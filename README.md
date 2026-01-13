@@ -1,6 +1,6 @@
 # CNC-Net_PyTorch
 
-This repository contains the official code to reproduce the results from the paper:
+This repository contains edited code to reproduce **CPU-only** the results from the following paper:
 
 **𝐂𝐍𝐂-𝐍𝐞𝐭: 𝐒𝐞𝐥𝐟-𝐒𝐮𝐩𝐞𝐫𝐯𝐢𝐬𝐞𝐝 𝐋𝐞𝐚𝐫𝐧𝐢𝐧𝐠 𝐟𝐨𝐫 𝐂𝐍𝐂 𝐌𝐚𝐜𝐡𝐢𝐧𝐢𝐧𝐠 𝐎𝐩𝐞𝐫𝐚𝐭𝐢𝐨𝐧𝐬**
 
@@ -28,18 +28,18 @@ Install the dependencies:
 * pysdf
 
 ## Quick Start
-To run the model for a given object follow the below command.
+To run the model **in CPU-only environments** for a given object follow the below command.
 ```
-python run.py --input_object {objec_name} --gpu {device_index} --experiment {experiment_name}
+python run.py --input_object {objec_name} --experiment {experiment_name}
 ```
 For example:
 ```
-python run.py --input_object '0.off' --gpu 0 --experiment exp_0
+python run.py --input_object '0.off' --experiment exp_0
 ```
 
 
 ### Citation
-If you find our code or paper useful, please consider citing:
+If you find the code and/or paper useful, please consider citing:
 ```
 @inproceedings{CNC-Net,
   title={CNC-Net: Self-Supervised Learning for CNC Machining Operations},

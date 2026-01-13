@@ -271,7 +271,7 @@ class Model(nn.Module):
             
             
             radius = self.f_radius(lstm_output)
-            tool_options = torch.Tensor([0.025, 0.05, 0.075, 0.1]).cuda()
+            tool_options = torch.Tensor([0.025, 0.05, 0.075, 0.1]).cpu()
             
             tool_distribution = F.gumbel_softmax(radius, tau=1, hard=True)
             tool_radius = torch.sum(tool_distribution*tool_options, dim=-1, keepdim=True)
@@ -290,7 +290,7 @@ class Model(nn.Module):
 
 
             R_M = pytorch3d.transforms.axis_angle_to_matrix(angles)
-            rot = Transform3d().cuda().rotate(R_M)
+            rot = Transform3d().cpu().rotate(R_M)
 
             mill_rot_param.append(angles)
             
@@ -366,7 +366,7 @@ class Model(nn.Module):
             angles = torch.cat([rot_param,torch.zeros_like(rot_param[...,:1])],-1)
 
             radius = self.f_radius_drill(lstm_output)
-            tool_options = torch.Tensor([0.01, 0.02, 0.03, 0.04]).cuda()
+            tool_options = torch.Tensor([0.01, 0.02, 0.03, 0.04]).cpu()
 
             tool_distribution = F.gumbel_softmax(radius, tau=1, hard=True)
             tool_radius = torch.sum(tool_distribution*tool_options, dim=-1, keepdim=True)
@@ -387,7 +387,7 @@ class Model(nn.Module):
                
 
             R_M = pytorch3d.transforms.axis_angle_to_matrix(angles)
-            rot = Transform3d().cuda().rotate(R_M)
+            rot = Transform3d().cpu().rotate(R_M)
                      
             drill_rot_param.append(angles)
 

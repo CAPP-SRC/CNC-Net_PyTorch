@@ -104,13 +104,13 @@ def get_spec_with_default(specs, key, default):
 
 def init_seeds(seed=0):
     torch.manual_seed(seed) # sets the seed for generating random numbers.
-    torch.cuda.manual_seed(seed) # Sets the seed for generating random numbers for the current GPU. It’s safe to call this function if CUDA is not available; in that case, it is silently ignored.
-    torch.cuda.manual_seed_all(seed) # Sets the seed for generating random numbers on all GPUs. It’s safe to call this function if CUDA is not available; in that case, it is silently ignored.
+    #torch.cuda.manual_seed(seed) # Sets the seed for generating random numbers for the current GPU. It’s safe to call this function if CUDA is not available; in that case, it is silently ignored.
+    #torch.cuda.manual_seed_all(seed) # Sets the seed for generating random numbers on all GPUs. It’s safe to call this function if CUDA is not available; in that case, it is silently ignored.
     #torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
 
 def main_function(experiment_directory, continue_from, input_object):
-	torch.cuda.empty_cache()
+	#torch.cuda.empty_cache()
 	init_seeds()
 	out_dir = 'checkpoints/'+experiment_directory+'/'
 	logger = logging.getLogger()
@@ -159,7 +159,7 @@ def main_function(experiment_directory, continue_from, input_object):
 
 
 	operation = Model(ef_dim = 256)
-	operation = operation.cuda()
+	operation = operation.cpu()
 
 
 
@@ -242,12 +242,12 @@ def main_function(experiment_directory, continue_from, input_object):
 		TOTAL_LOSS = 0
 		for inds_inout, all_points, all_points_high, dimension, shape_names  in tqdm(train_loader):
 			
-			dimension = dimension.cuda()
-			inds_inout = inds_inout.cuda()
-			all_points = all_points.cuda()
+			dimension = dimension.cpu()
+			inds_inout = inds_inout.cpu()
+			all_points = all_points.cpu()
 		
 			current = -torch.ones_like(inds_inout)
-			current_high = -torch.ones(1,256*256*256).cuda().float()
+			current_high = -torch.ones(1,256*256*256).cpu().float()
 	
 			total_loss, outputs = operation(current, current_high, all_points, all_points_high, inds_inout, 100, out_dir, torch.mean(best_iou.detach()), dimension, epoch, False)	
 			
@@ -278,14 +278,14 @@ def main_function(experiment_directory, continue_from, input_object):
 			with torch.no_grad():
 				inds_inout, all_points, all_points_high, dimension, shape_names = next(iter(test_loader))
 				
-				dimension = dimension.cuda()
-				inds_inout = inds_inout.cuda()
-				all_points = all_points.cuda()
-				all_points_high = all_points_high.cuda()
+				dimension = dimension.cpu()
+				inds_inout = inds_inout.cpu()
+				all_points = all_points.cpu()
+				all_points_high = all_points_high.cpu()
 
 				
 				current = -torch.ones_like(inds_inout)
-				current_high = -torch.ones(1,256*256*256).cuda().float()
+				current_high = -torch.ones(1,256*256*256).cpu().float()
 
 				_, outputs, outputs_high = operation(current, current_high, all_points, all_points_high, inds_inout, 100, out_dir, best_iou[shape_names], dimension, epoch, True)	
 				iou = IOU(outputs, inds_inout)
@@ -354,7 +354,7 @@ if __name__ == "__main__":
 		"--gpu",
 		"-g",
 		dest="gpu",
-		required=True,
+		required=False,
 		help="gpu id",
 	)
 
@@ -398,6 +398,7 @@ if __name__ == "__main__":
 	else:
 		print(f"Directory '{directory_path}' already exists.")
 				
-	os.environ["CUDA_VISIBLE_DEVICES"]="%d"%int(args.gpu)
+	#os.environ["CUDA_VISIBLE_DEVICES"]="%d"%int(args.gpu)
+	os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 	main_function(args.experiment_directory, args.continue_from, args.input_object)
