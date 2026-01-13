@@ -18,14 +18,34 @@ git clone https://github.com/CAPP-SRC/CNC-Net_PyTorch.git
 cd CNC-Net_PyTorch
 ```
 
-### Dependencies
+### Dependencies / Installation [WIP]
 Install the dependencies:
+
 * Python 3.8.18
-* PyTorch 1.12.1
-* numpy
-* open3d
-* pytorch3d
-* pysdf
+
+* pytorch-cpu 1.12.1
+* conda install -c pytorch pytorch=1.12.1 torchvision cpuonly
+
+* pip install numpy==1.24.4
+
+* pip install open3d-cpu
+
+* pip install fvcore iopath
+* conda install -c fvcore -c iopath -c conda-forge fvcore iopath
+* sudo apt install build-essential
+* pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable"
+
+* pip install scipy
+* pip install PyMCubes==0.1.4
+
+* conda install plyfile
+* pip install plyfile
+
+* pip install --force-reinstall charset-normalizer==3.1.0
+
+* pip install required/pymesh2-0.3-cp38-cp38-linux_x86_64.whl
+
+* pip install pysdf
 
 ## Quick Start
 To run the model **in CPU-only environments** for a given object follow the below command.
