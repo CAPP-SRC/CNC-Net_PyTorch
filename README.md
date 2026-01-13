@@ -1,4 +1,4 @@
-# CNC-Net_PyTorch
+# CNC-Net_PyTorch - CPU-only
 
 This repository contains edited code to reproduce **CPU-only** the results from the following paper:
 
@@ -14,7 +14,7 @@ This repository contains edited code to reproduce **CPU-only** the results from 
 ## Installation
 Clone this repository into any place you want.
 ```
-git clone https://github.com/myavartanoo/CNC-Net_PyTorch.git
+git clone https://github.com/CAPP-SRC/CNC-Net_PyTorch.git
 cd CNC-Net_PyTorch
 ```
 
