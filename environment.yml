@@ -10,8 +10,8 @@ dependencies:
   - tqdm
   - pip
   - pip:
-      - torch>=2.1
-      - torch_xla>=2.1
+      # - torch>=2.1
+      # - torch_xla>=2.1
       - open3d
       - pysdf
       - trimesh
