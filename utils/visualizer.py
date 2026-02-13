@@ -1,13 +1,12 @@
 import open3d as o3d
 import trimesh
 import numpy as np
-import pymesh       
+import pymesh
 import trimesh
 import torch
-import pytorch3d
 from tqdm import tqdm
 from utils.output_xyz import output_xyz
-from pytorch3d.transforms.transform3d import Transform3d
+from utils.tpu_ops import axis_angle_to_matrix, Transform3d
 
 
 def intersect(p1, p2, p3, p4):
@@ -179,7 +178,7 @@ def visualize(cnc_parameters, all_points, out_dir):
 
 
    for i in range(drill_xy.shape[0]):
-      R_M = pytorch3d.transforms.axis_angle_to_matrix(drill_rot_param[i])
+      R_M = axis_angle_to_matrix(drill_rot_param[i])
       rot = Transform3d().rotate(R_M)      
       R_M_inv = torch.from_numpy(np.linalg.inv(R_M.numpy()))
       rot_inv = Transform3d().rotate(R_M_inv)
@@ -205,7 +204,7 @@ def visualize(cnc_parameters, all_points, out_dir):
       vertices,faces = get_mesh(trajectory, radius)
       mesh_2d = pymesh.form_mesh(np.array(vertices), np.array(faces))
 
-      R_M = pytorch3d.transforms.axis_angle_to_matrix(mill_rot_param[j])
+      R_M = axis_angle_to_matrix(mill_rot_param[j])
       rot = Transform3d().rotate(R_M)
       R_M_inv = torch.from_numpy(np.linalg.inv(R_M.numpy()))
       rot_inv = Transform3d().rotate(R_M_inv)
@@ -376,7 +375,7 @@ def visualize_old(cnc_parameters, all_points, out_dir):
 
 
    for i in range(drill_xy.shape[0]):
-      R_M_inv = pytorch3d.transforms.axis_angle_to_matrix(-drill_rot_param[i])
+      R_M_inv = axis_angle_to_matrix(-drill_rot_param[i])
       rot_inv = Transform3d().rotate(R_M_inv)
       r = drill_radius[i][0]
       cylinder_drill = pymesh.generate_cylinder(rot_inv.transform_points(drill_xyz[i,0].unsqueeze(0))[0], rot_inv.transform_points((drill_xyz[i,0]+torch.Tensor([0,0,1])).unsqueeze(0))[0], r, r, num_segments=16)
@@ -398,9 +397,9 @@ def visualize_old(cnc_parameters, all_points, out_dir):
       vertices,faces = get_mesh(trajectory, radius)
       mesh_2d = pymesh.form_mesh(np.array(vertices), np.array(faces))
 
-      R_M = pytorch3d.transforms.axis_angle_to_matrix(mill_rot_param[j])
+      R_M = axis_angle_to_matrix(mill_rot_param[j])
       rot = Transform3d().rotate(R_M)
-      R_M_inv = pytorch3d.transforms.axis_angle_to_matrix(-mill_rot_param[j])
+      R_M_inv = axis_angle_to_matrix(-mill_rot_param[j])
       rot_inv = Transform3d().rotate(R_M_inv)
 
 

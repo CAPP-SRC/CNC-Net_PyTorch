@@ -1,0 +1,12 @@
+torch>=2.1
+torch_xla>=2.1
+numpy
+open3d
+pysdf
+scipy
+trimesh
+h5py
+PyMCubes
+pymesh2
+plyfile
+tqdm

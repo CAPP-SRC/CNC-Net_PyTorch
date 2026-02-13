@@ -1,5 +1,5 @@
 import torch
-from pytorch3d.ops import knn_points
+from utils.tpu_ops import knn_points
 
 
 def pairwise_distances(x, y):
@@ -28,7 +28,8 @@ def filter_points2(point_cloud, radius_value, num_threshold=3):
 
 
 def filter_points(point_cloud, dimension):
-    nn_dists, nn_idx, nn = knn_points(point_cloud*torch.reciprocal(dimension), point_cloud*torch.reciprocal(dimension), K=7)
+    knn_result = knn_points(point_cloud*torch.reciprocal(dimension), point_cloud*torch.reciprocal(dimension), K=7)
+    nn_dists = knn_result.dists
     nn_dists = torch.sqrt(nn_dists)
     threshold = torch.min(nn_dists[0,:,1:])+0.0005
     pcd_filtered = point_cloud[:, nn_dists[0,:,1:].mean(1) < threshold]

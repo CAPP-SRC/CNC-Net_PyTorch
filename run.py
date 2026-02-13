@@ -11,6 +11,8 @@ import torch.nn as nn
 import random
 import numpy as np
 from tqdm import tqdm
+import torch_xla
+import torch_xla.core.xla_model as xm
 
 import utils
 import utils.workspace as ws
@@ -103,14 +105,10 @@ def get_spec_with_default(specs, key, default):
 		return default
 
 def init_seeds(seed=0):
-    torch.manual_seed(seed) # sets the seed for generating random numbers.
-    torch.cuda.manual_seed(seed) # Sets the seed for generating random numbers for the current GPU. It’s safe to call this function if CUDA is not available; in that case, it is silently ignored.
-    torch.cuda.manual_seed_all(seed) # Sets the seed for generating random numbers on all GPUs. It’s safe to call this function if CUDA is not available; in that case, it is silently ignored.
-    #torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = True
+    torch.manual_seed(seed)
 
 def main_function(experiment_directory, continue_from, input_object):
-	torch.cuda.empty_cache()
+	device = xm.xla_device()
 	init_seeds()
 	out_dir = 'checkpoints/'+experiment_directory+'/'
 	logger = logging.getLogger()
@@ -158,8 +156,8 @@ def main_function(experiment_directory, continue_from, input_object):
 
 
 
-	operation = Model(ef_dim = 256)
-	operation = operation.cuda()
+	operation = Model(ef_dim = 256, device=device)
+	operation = operation.to(device)
 
 
 
@@ -214,7 +212,7 @@ def main_function(experiment_directory, continue_from, input_object):
 	if continue_from is not None: 
 		
 		logging.info('continuing from "{}"'.format(continue_from))
-		load = torch.load(out_dir+'operation_checkpoint_'+str(continue_from)+'.pth')
+		load = torch.load(out_dir+'operation_checkpoint_'+str(continue_from)+'.pth', map_location='cpu')
 		operation.load_state_dict(load["operation_state_dict"])
 		optimizer_operation.load_state_dict(load["optimizer_state_dict"])
 		model_epoch = load["epoch"]		
@@ -242,12 +240,12 @@ def main_function(experiment_directory, continue_from, input_object):
 		TOTAL_LOSS = 0
 		for inds_inout, all_points, all_points_high, dimension, shape_names  in tqdm(train_loader):
 			
-			dimension = dimension.cuda()
-			inds_inout = inds_inout.cuda()
-			all_points = all_points.cuda()
-		
+			dimension = dimension.to(device)
+			inds_inout = inds_inout.to(device)
+			all_points = all_points.to(device)
+
 			current = -torch.ones_like(inds_inout)
-			current_high = -torch.ones(1,256*256*256).cuda().float()
+			current_high = -torch.ones(1,256*256*256, device=device).float()
 	
 			total_loss, outputs = operation(current, current_high, all_points, all_points_high, inds_inout, 100, out_dir, torch.mean(best_iou.detach()), dimension, epoch, False)	
 			
@@ -257,9 +255,10 @@ def main_function(experiment_directory, continue_from, input_object):
 
 			
 			
-			optimizer_operation.zero_grad()	
+			optimizer_operation.zero_grad()
 			total_loss.backward()
-			optimizer_operation.step()		     
+			optimizer_operation.step()
+			xm.mark_step()
 
 
 			del total_loss
@@ -278,14 +277,13 @@ def main_function(experiment_directory, continue_from, input_object):
 			with torch.no_grad():
 				inds_inout, all_points, all_points_high, dimension, shape_names = next(iter(test_loader))
 				
-				dimension = dimension.cuda()
-				inds_inout = inds_inout.cuda()
-				all_points = all_points.cuda()
-				all_points_high = all_points_high.cuda()
+				dimension = dimension.to(device)
+				inds_inout = inds_inout.to(device)
+				all_points = all_points.to(device)
+				all_points_high = all_points_high.to(device)
 
-				
 				current = -torch.ones_like(inds_inout)
-				current_high = -torch.ones(1,256*256*256).cuda().float()
+				current_high = -torch.ones(1,256*256*256, device=device).float()
 
 				_, outputs, outputs_high = operation(current, current_high, all_points, all_points_high, inds_inout, 100, out_dir, best_iou[shape_names], dimension, epoch, True)	
 				iou = IOU(outputs, inds_inout)
@@ -296,7 +294,7 @@ def main_function(experiment_directory, continue_from, input_object):
 				outputs_high = 0.5*(-torch.sign(outputs_high)+1)
 				samples = all_points_high
 
-				create_mesh_mc(samples, outputs_high, dimension, os.path.join("output",experiment_directory,input_object[:-4]))
+				create_mesh_mc(samples, outputs_high, dimension, os.path.join("output",experiment_directory,input_object[:-4]), device=device)
 
 				average_best_iou = sum(IOU_total)/len(IOU_total)
 			logging.debug('Average IOU:\t{:.6f}'.format(average_best_iou))
@@ -306,13 +304,13 @@ def main_function(experiment_directory, continue_from, input_object):
 
 			BEST_IOU = average_best_iou
 			model_path = out_dir+"operation_checkpoint_"+str(epoch)+".pth"
-			torch.save({
+			xm.save({
 				'epoch': epoch,
 				'operation_state_dict': operation.state_dict(),
 				'optimizer_state_dict': optimizer_operation.state_dict(),
-			}, model_path)	
+			}, model_path)
 			model_path2 = out_dir+"best_checkpoint"+".pth"
-			torch.save({
+			xm.save({
 				'epoch': epoch,
 				'operation_state_dict': operation.state_dict(),
 				'optimizer_state_dict': optimizer_operation.state_dict(),
@@ -351,11 +349,12 @@ if __name__ == "__main__":
 	)
 
 	arg_parser.add_argument(
-		"--gpu",
-		"-g",
-		dest="gpu",
-		required=True,
-		help="gpu id",
+		"--tpu",
+		"-t",
+		dest="tpu",
+		required=False,
+		default="0",
+		help="tpu core index (default: 0)",
 	)
 
 	arg_parser.add_argument(
@@ -373,7 +372,6 @@ if __name__ == "__main__":
 	args = arg_parser.parse_args()
 
 	utils.configure_logging(args)
-	os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 
 	if args.input_object == 'all':
 		args.input_object = None
@@ -398,6 +396,4 @@ if __name__ == "__main__":
 	else:
 		print(f"Directory '{directory_path}' already exists.")
 				
-	os.environ["CUDA_VISIBLE_DEVICES"]="%d"%int(args.gpu)
-
 	main_function(args.experiment_directory, args.continue_from, args.input_object)

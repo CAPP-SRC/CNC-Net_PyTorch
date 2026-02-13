@@ -17,7 +17,7 @@ def extract_largest_component(mesh):
     return largest_mesh
 
 def create_mesh_mc(
-	all_points, current, dimension, filename, N=256, max_batch=260**3, threshold=0.5
+	all_points, current, dimension, filename, N=256, max_batch=260**3, threshold=0.5, device=None
 ):
 	"""
 	Create a mesh using the marching cubes algorithm.
@@ -59,7 +59,9 @@ def create_mesh_mc(
 	samples = samples.reshape([-1,4])
 	occ = occ.reshape([-1,1])
 	while head < num_samples:
-		sample_subset = samples[head : min(head + max_batch, num_samples), 0:3].cuda()
+		sample_subset = samples[head : min(head + max_batch, num_samples), 0:3]
+		if device is not None:
+			sample_subset = sample_subset.to(device)
 
 	# 	occ,_,_ = generator(sample_subset.unsqueeze(0), shape_3d, shape_code)
 		samples[head : min(head + max_batch, num_samples), 3] = (

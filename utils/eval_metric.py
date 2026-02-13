@@ -2,7 +2,7 @@
 import trimesh
 import torch
 import numpy as np
-from pytorch3d.ops.knn import knn_gather, knn_points
+from utils.tpu_ops import knn_points, knn_gather
 
 
 
