@@ -42,22 +42,16 @@ def get_chamfer_distance(pred_points, gt_points):
 
 
 def IOU(current, inds_inout):
-    in_current = (current[0]<0).nonzero().squeeze().cpu().numpy()
-    out_current = (current[0]>0).nonzero().squeeze().cpu().numpy()
+    in_current = current[0] < 0
+    in_gt = inds_inout[0] < 0
 
-    in_gt =(inds_inout[0]<0).nonzero().squeeze().cpu().numpy()
-    out_gt = (inds_inout[0]>0).nonzero().squeeze().cpu().numpy()
+    intersection = (in_current & in_gt).sum()
+    union = (in_current | in_gt).sum()
 
-    in_intersection = np.intersect1d(in_current, in_gt)
-    in_union = np.union1d(in_current, in_gt)
-    #out_intersection = np.intersect1d(out_current, out_gt)
-    #out_union = np.union1d(out_current, out_gt)
-
-    #return (in_intersection.shape[0]+out_intersection.shape[0])/(in_union.shape[0]+out_union.shape[0])
-    if in_union.shape[0]!=0:
-       return in_intersection.shape[0]/in_union.shape[0]
+    if union.item() != 0:
+        return (intersection.float() / union.float()).item()
     else:
-       return in_union.shape[0]
+        return 0.0
 
 
 def LFD(mesh1_v, mesh1_face, mesh2_v, mesh2_face):

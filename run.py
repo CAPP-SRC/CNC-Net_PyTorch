@@ -4,7 +4,6 @@ import signal
 import sys
 import os
 import logging
-import math
 import json
 import time
 import torch.nn as nn
@@ -13,6 +12,7 @@ import numpy as np
 from tqdm import tqdm
 import torch_xla
 import torch_xla.core.xla_model as xm
+import torch_xla.distributed.parallel_loader as pl
 
 import utils
 import utils.workspace as ws
@@ -158,6 +158,7 @@ def main_function(experiment_directory, continue_from, input_object):
 
 	operation = Model(ef_dim = 256, device=device)
 	operation = operation.to(device)
+	operation = torch.compile(operation, backend='openxla')
 
 
 
@@ -177,19 +178,24 @@ def main_function(experiment_directory, continue_from, input_object):
 
 
 
+	BATCH_SIZE = 8
+
 	train_loader = data_utils.DataLoader(
 		occ_dataset_train,
-		batch_size=1,
+		batch_size=BATCH_SIZE,
 		shuffle=False,
-		num_workers=6
+		num_workers=0,
+		drop_last=True
 	)
+	train_loader = pl.MpDeviceLoader(train_loader, device)
 
 	test_loader = data_utils.DataLoader(
 		occ_dataset_test,
 		batch_size=1,
 		shuffle=False,
-		num_workers=6
+		num_workers=0
 	)
+	test_loader = pl.MpDeviceLoader(test_loader, device)
 
 
 	num_scenes = len(occ_dataset_train)
@@ -226,7 +232,7 @@ def main_function(experiment_directory, continue_from, input_object):
 
 	
 	last_epoch_time = 0
-	best_iou = torch.zeros(len(train_loader))
+	best_iou = torch.zeros(len(train_loader), device=device)
 
 
 
@@ -238,27 +244,21 @@ def main_function(experiment_directory, continue_from, input_object):
 		adjust_learning_rate(lr_schedules, optimizer_operation, epoch - start_epoch)
 
 		TOTAL_LOSS = 0
-		for inds_inout, all_points, all_points_high, dimension, shape_names  in tqdm(train_loader):
-			
-			dimension = dimension.to(device)
-			inds_inout = inds_inout.to(device)
-			all_points = all_points.to(device)
+		for step_idx, (inds_inout, all_points, all_points_high, dimension, shape_names) in enumerate(tqdm(train_loader)):
+			# MpDeviceLoader already places tensors on TPU — no .to(device) needed
 
 			current = -torch.ones_like(inds_inout)
-			current_high = -torch.ones(1,256*256*256, device=device).float()
-	
-			total_loss, outputs = operation(current, current_high, all_points, all_points_high, inds_inout, 100, out_dir, torch.mean(best_iou.detach()), dimension, epoch, False)	
-			
-			
-			if not math.isnan(total_loss):
-				TOTAL_LOSS += total_loss.detach()/len(train_loader)
+			current_high = -torch.ones(inds_inout.shape[0], 256*256*256, device=device).float()
 
-			
-			
+			total_loss, outputs = operation(current, current_high, all_points, all_points_high, inds_inout, 100, out_dir, torch.mean(best_iou.detach()), dimension, epoch, False)
+
+
+			valid = ~torch.isnan(total_loss.detach())
+			TOTAL_LOSS += torch.where(valid, total_loss.detach()/len(train_loader), torch.zeros_like(total_loss))
+
 			optimizer_operation.zero_grad()
 			total_loss.backward()
-			optimizer_operation.step()
-			xm.mark_step()
+			xm.optimizer_step(optimizer_operation)
 
 
 			del total_loss
@@ -276,16 +276,12 @@ def main_function(experiment_directory, continue_from, input_object):
 			IOU_total = []
 			with torch.no_grad():
 				inds_inout, all_points, all_points_high, dimension, shape_names = next(iter(test_loader))
-				
-				dimension = dimension.to(device)
-				inds_inout = inds_inout.to(device)
-				all_points = all_points.to(device)
-				all_points_high = all_points_high.to(device)
+				# MpDeviceLoader already places tensors on TPU — no .to(device) needed
 
 				current = -torch.ones_like(inds_inout)
 				current_high = -torch.ones(1,256*256*256, device=device).float()
 
-				_, outputs, outputs_high = operation(current, current_high, all_points, all_points_high, inds_inout, 100, out_dir, best_iou[shape_names], dimension, epoch, True)	
+				_, outputs, outputs_high = operation(current, current_high, all_points, all_points_high, inds_inout, 100, out_dir, best_iou[shape_names], dimension, epoch, True)
 				iou = IOU(outputs, inds_inout)
 				IOU_total.append(iou)
 				if best_iou[shape_names]<iou:

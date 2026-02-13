@@ -3,7 +3,6 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
-import copy
 
 from utils.tpu_ops import knn_points, knn_gather, axis_angle_to_matrix, Transform3d
 from networks.primitives import CSG
@@ -211,8 +210,10 @@ class Model(nn.Module):
 
                 
         self.softmax = nn.Softmax(dim=-1)
-        
-                
+
+        self.register_buffer('mill_tool_options', torch.tensor([0.025, 0.05, 0.075, 0.1]))
+        self.register_buffer('drill_tool_options', torch.tensor([0.01, 0.02, 0.03, 0.04]))
+
         self.Encoder = Encoder()
 
 
@@ -226,14 +227,13 @@ class Model(nn.Module):
         Loss_occ = []
         current = initial_current
         current_high = initial_current_high
-        loss_occ = 0
+        loss_occ = torch.tensor(0.0, device=self.device)
         loss_ends = 0
-        loss_occ_prev = -1
-        loss_occ_next = 0
+        loss_occ_prev = torch.tensor(-1.0, device=self.device)
         it_mill = 0
         loss_roi = 0
         Loss_occ_drill = 0
-        vox_size = 64      
+        vox_size = 64
 
 
         mill_xy = []
@@ -244,12 +244,11 @@ class Model(nn.Module):
 
         # Milling operations — fixed iteration count for XLA compatibility
         for _mill_iter in range(MAX_MILL):
-            if it_mill > 0:
-               loss_occ_prev = loss_occ.detach().cpu().numpy()
-
-            # Early-exit check (evaluated on CPU after mark_step)
-            if it_mill > 0 and np.abs(loss_occ_next - loss_occ_prev) <= 0.0001:
+            # On-device convergence check — avoids TPU-to-CPU sync
+            if it_mill > 0 and torch.abs(loss_occ.detach() - loss_occ_prev).item() <= 0.0001:
                 break
+            if it_mill > 0:
+                loss_occ_prev = loss_occ.detach()
 
             current_roi = torch.minimum(inds_inout, torch.sign(-current).detach())
 
@@ -273,10 +272,9 @@ class Model(nn.Module):
 
 
             radius = self.f_radius(lstm_output)
-            tool_options = torch.tensor([0.025, 0.05, 0.075, 0.1], device=self.device)
 
             tool_distribution = F.gumbel_softmax(radius, tau=1, hard=True)
-            tool_radius = torch.sum(tool_distribution*tool_options, dim=-1, keepdim=True)
+            tool_radius = torch.sum(tool_distribution*self.mill_tool_options, dim=-1, keepdim=True)
             mill_radius.append(tool_radius)
 
 
@@ -312,14 +310,11 @@ class Model(nn.Module):
 
 
 
-            loss_occ_next = loss_occ.detach().cpu().numpy()
-
             it_mill += 1
 
-        
 
         it_path = it_mill-1
-        loss_occ_prev = loss_occ_next-1
+        loss_occ_prev = loss_occ.detach() - 1
 
         mill_xy = torch.stack(mill_xy, dim=1).squeeze(0)
         mill_z = torch.stack(mill_z, dim=1).squeeze(0)
@@ -333,7 +328,7 @@ class Model(nn.Module):
 
         Loss_occ_drill = mse(torch.tanh(w*current), inds_inout)
 
-        current = copy.deepcopy(current.detach())
+        current = current.detach().clone()
         loss_nroi = 0
         it_drill = 0
         MAX_DRILL = 20
@@ -344,11 +339,10 @@ class Model(nn.Module):
             if best_iou <= 0.92:
                 break
 
-            loss_occ_prev = loss_occ.detach().cpu().numpy()
-
-            # Early-exit check (evaluated on CPU after mark_step)
-            if it_drill > 0 and np.abs(loss_occ_next - loss_occ_prev) <= 0.1:
+            # On-device convergence check — avoids TPU-to-CPU sync
+            if it_drill > 0 and torch.abs(loss_occ.detach() - loss_occ_prev).item() <= 0.1:
                 break
+            loss_occ_prev = loss_occ.detach()
 
             current_roi = torch.minimum(inds_inout, torch.sign(-current).detach())
 
@@ -370,10 +364,9 @@ class Model(nn.Module):
             angles = torch.cat([rot_param,torch.zeros_like(rot_param[...,:1])],-1)
 
             radius = self.f_radius_drill(lstm_output)
-            tool_options = torch.tensor([0.01, 0.02, 0.03, 0.04], device=self.device)
 
             tool_distribution = F.gumbel_softmax(radius, tau=1, hard=True)
-            tool_radius = torch.sum(tool_distribution*tool_options, dim=-1, keepdim=True)
+            tool_radius = torch.sum(tool_distribution*self.drill_tool_options, dim=-1, keepdim=True)
 
             drill_radius.append(tool_radius)
 
@@ -420,8 +413,6 @@ class Model(nn.Module):
             loss_roi += mse(torch.tanh(w*cyl[inds_inout<0]), torch.ones_like(cyl[inds_inout<0]))
 
 
-
-            loss_occ_next = loss_occ.detach().cpu().numpy()
 
             it_drill += 1
        
