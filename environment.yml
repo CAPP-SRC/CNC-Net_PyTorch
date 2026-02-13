@@ -3,7 +3,7 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-  - python>=3.9,<3.12
+  - python=3.10
   - numpy
   - scipy
   - h5py
@@ -16,5 +16,5 @@ dependencies:
       - pysdf
       - trimesh
       - PyMCubes
-      - pymesh2
       - plyfile
+      - -e ./required/pymesh2-0.3.1-cp310-cp310-linux_x86_64.whl
