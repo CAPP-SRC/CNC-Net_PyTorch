@@ -1,7 +1,6 @@
 import json
 import os
 import torch
-import torch_xla.core.xla_model as xm
 
 model_params_subdir = "ModelParameters"
 latent_codes_subdir = "LatentCodes"
@@ -26,7 +25,7 @@ def save_model_parameters(experiment_directory, filename, decoder, opt, epoch):
 
 	model_params_dir = get_model_params_dir(experiment_directory, True)
 
-	xm.save(
+	torch.save(
 		{"epoch": epoch,
 		"decoder_state_dict": decoder.state_dict(),
 		"opt_state_dict": opt.state_dict()},
@@ -42,8 +41,8 @@ def load_model_parameters(experiment_directory, checkpoint, decoder, opt):
 	if not os.path.isfile(filename):
 		raise Exception('model state dict "{}" does not exist'.format(filename))
 
-	data = torch.load(filename, map_location='cpu')
-
+	data = torch.load(filename)
+	
 
 
 	decoder.load_state_dict(data["decoder_state_dict"])
@@ -56,11 +55,11 @@ def save_model_parameters_per_shape(experiment_directory, shapename, filename, d
 	model_params_dir = get_model_params_dir(experiment_directory, True)
 	model_params_dir = get_model_params_dir_shapename(model_params_dir, shapename, True)
 
-	xm.save(
+	torch.save(
 		{"epoch": epoch,
 		"plane_state_dict": shape_code,
 		"decoder_state_dict": decoder.state_dict(),
-		"opt_state_dict": opt.state_dict()},
+		"opt_state_dict": opt.state_dict()}, 
 		os.path.join(model_params_dir, filename)
 	)
 
@@ -73,7 +72,7 @@ def load_model_parameters_per_shape(experiment_directory, shapename, checkpoint,
 	if not os.path.isfile(filename):
 		raise Exception('model state dict "{}" does not exist'.format(filename))
 
-	data = torch.load(filename, map_location='cpu')
+	data = torch.load(filename)
 
 	#test stage no opt
 	if opt is not None:

@@ -11,52 +11,30 @@ This repository contains the official code to reproduce the results from the pap
 <img src="source/Framework.png" width="100%"/>  
 </p>
 
-## Installation (Google Cloud TPU)
-
-### Prerequisites
-* A Google Cloud TPU VM (v2 or later)
-* Conda (Miniconda or Anaconda)
-
-### 1. Clone the repository
-```bash
+## Installation
+Clone this repository into any place you want.
+```
 git clone https://github.com/myavartanoo/CNC-Net_PyTorch.git
 cd CNC-Net_PyTorch
 ```
 
-### 2. Create the conda environment
-```bash
-conda env create -f environment.yml
-conda activate cnctorch-tpu
-```
-
-Or install from `requirements.txt` into an existing Python >= 3.9 environment:
-```bash
-pip install -r requirements.txt
-```
-
 ### Dependencies
-* Python >= 3.9
-* PyTorch >= 2.1
-* torch_xla >= 2.1
+Install the dependencies:
+* Python 3.8.18
+* PyTorch 1.12.1
 * numpy
 * open3d
+* pytorch3d
 * pysdf
-* scipy
-* trimesh
-* h5py
-* PyMCubes
-* pymesh2
-* plyfile
-* tqdm
 
 ## Quick Start
-To run the model for a given object on TPU:
-```bash
-python run.py --input_object {object_name} --experiment {experiment_name}
+To run the model for a given object follow the below command.
+```
+python run.py --input_object {objec_name} --gpu {device_index} --experiment {experiment_name}
 ```
 For example:
-```bash
-python run.py --input_object '0.off' --experiment exp_0
+```
+python run.py --input_object '0.off' --gpu 0 --experiment exp_0
 ```
 
 

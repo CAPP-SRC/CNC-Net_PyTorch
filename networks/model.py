@@ -3,8 +3,9 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
+import copy
 
-from utils.tpu_ops import knn_points, knn_gather, axis_angle_to_matrix, Transform3d
+from utils.xla_ops import axis_angle_to_matrix, transform_points, knn_points
 from networks.primitives import CSG
 from networks.capri import Encoder
 from utils.denoise_points import filter_points
@@ -34,11 +35,10 @@ def chamfer_distance_kdtree(x, y):
     # Apply point reduction
     cham_x = torch.sqrt(cham_x)  # (N,)
     cham_y = torch.sqrt(cham_y)  # (N,)
-    
 
 
     return cham_x,cham_y
-    
+
 mse = nn.MSELoss(reduction = 'mean')
 
 
@@ -90,7 +90,7 @@ class ResnetBlockFC(nn.Module):
 
 class Model(nn.Module):
     def _initialize_weights(self):
-       
+
         for m in self.f_rot:
             if isinstance(m, nn.Linear):
                 init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity = 'relu')
@@ -101,26 +101,25 @@ class Model(nn.Module):
             if isinstance(m, nn.Linear):
                 init.kaiming_normal_(m.weight, mode = 'fan_in', nonlinearity = 'relu')
                 if m.bias is not None:
-                    init.constant_(m.bias, 0)    
+                    init.constant_(m.bias, 0)
 
         for m in self.p_xy:
             if isinstance(m, nn.Linear):
                 init.kaiming_normal_(m.weight, mode = 'fan_in', nonlinearity = 'relu')
                 if m.bias is not None:
-                    init.constant_(m.bias, 0) 
-                    
+                    init.constant_(m.bias, 0)
+
         for m in self.p_z:
             if isinstance(m, nn.Linear):
                 init.kaiming_normal_(m.weight, mode = 'fan_in', nonlinearity = 'relu')
                 if m.bias is not None:
-                    init.constant_(m.bias, 0)                                                                 
+                    init.constant_(m.bias, 0)
 
 
-                            
-    def __init__(self, ef_dim=256, device=None):
+
+    def __init__(self, ef_dim=256):
         super(Model, self).__init__()
         self.ef_dim = ef_dim
-        self.device = device
         self.lstm = nn.LSTM(input_size=self.ef_dim+3, hidden_size=self.ef_dim, num_layers=2, batch_first=True) #input_size = 2048
 
         f_rot = []
@@ -144,7 +143,7 @@ class Model(nn.Module):
         f_radius.append(ResnetBlockFC(self.ef_dim))
         f_radius.append(nn.Linear(self.ef_dim , 4, bias=True))
         self.f_radius = nn.Sequential(*f_radius)
-        
+
 
 
         p_xy = []
@@ -154,8 +153,8 @@ class Model(nn.Module):
         p_xy.append(ResnetBlockFC(self.ef_dim))
         p_xy.append(ResnetBlockFC(self.ef_dim))
         p_xy.append(ResnetBlockFC(self.ef_dim))
-        p_xy.append(ResnetBlockFC(self.ef_dim))       
-        p_xy.append(nn.Linear(self.ef_dim , 2, bias=True))	
+        p_xy.append(ResnetBlockFC(self.ef_dim))
+        p_xy.append(nn.Linear(self.ef_dim , 2, bias=True))
         self.p_xy = nn.Sequential(*p_xy)
 
         p_z = []
@@ -189,8 +188,8 @@ class Model(nn.Module):
         p_xyz_drill.append(ResnetBlockFC(self.ef_dim))
         p_xyz_drill.append(ResnetBlockFC(self.ef_dim))
         p_xyz_drill.append(ResnetBlockFC(self.ef_dim))
-        p_xyz_drill.append(ResnetBlockFC(self.ef_dim))       
-        p_xyz_drill.append(nn.Linear(self.ef_dim , 3, bias=True))	
+        p_xyz_drill.append(ResnetBlockFC(self.ef_dim))
+        p_xyz_drill.append(nn.Linear(self.ef_dim , 3, bias=True))
         self.p_xyz_drill = nn.Sequential(*p_xyz_drill)
 
 
@@ -208,18 +207,16 @@ class Model(nn.Module):
 
 
 
-                
+
         self.softmax = nn.Softmax(dim=-1)
 
-        self.register_buffer('mill_tool_options', torch.tensor([0.025, 0.05, 0.075, 0.1]))
-        self.register_buffer('drill_tool_options', torch.tensor([0.01, 0.02, 0.03, 0.04]))
 
         self.Encoder = Encoder()
 
 
 
     def forward(self,  initial_current, initial_current_high, all_points, all_points_high, inds_inout,   n_step,out_dir, best_iou, dimension, epoch, test):
-            
+
         w = 1000
 
         hidden = None # Initialize the hidden state
@@ -227,32 +224,32 @@ class Model(nn.Module):
         Loss_occ = []
         current = initial_current
         current_high = initial_current_high
-        loss_occ = torch.tensor(0.0, device=self.device)
+        loss_occ = 0
         loss_ends = 0
-        loss_occ_prev = torch.tensor(-1.0, device=self.device)
+        loss_occ_prev = -1
+        loss_occ_next = 0
         it_mill = 0
         loss_roi = 0
         Loss_occ_drill = 0
         vox_size = 64
 
+        device = all_points.device
 
         mill_xy = []
         mill_z = []
         mill_radius = []
         mill_rot_param = []
-        MAX_MILL = 20
 
-        # Milling operations — fixed iteration count for XLA compatibility
-        for _mill_iter in range(MAX_MILL):
-            # On-device convergence check — avoids TPU-to-CPU sync
-            if it_mill > 0 and torch.abs(loss_occ.detach() - loss_occ_prev).item() <= 0.0001:
-                break
-            if it_mill > 0:
-                loss_occ_prev = loss_occ.detach()
+        # Milling operations
+        while np.abs(loss_occ_next-loss_occ_prev)>0.0001  and it_mill <20:
+            if it_mill>0:
+               loss_occ_prev = loss_occ.detach().cpu().numpy()
+
 
             current_roi = torch.minimum(inds_inout, torch.sign(-current).detach())
 
             current_feat = torch.cat([self.Encoder(current_roi.view(1,1,vox_size,vox_size,vox_size)),dimension.float()],-1)
+
 
             itt = torch.zeros_like(current_feat[:,:1])
             itt[:, 0] = it_mill
@@ -261,9 +258,9 @@ class Model(nn.Module):
             lstm_output = lstm_output.squeeze(1)
 
             N = n_step
-            steps = torch.arange(start=0, end=1, step=1/N, device=lstm_output.device)
+            steps = torch.arange(start=0, end=1, step=1/N, device=device)
             steps = steps.unsqueeze(0).expand(lstm_output.shape[0], -1).unsqueeze(-1)
-            steps_high = torch.arange(start=0, end=1, step=1/(5*N), device=lstm_output.device)
+            steps_high = torch.arange(start=0, end=1, step=1/(5*N), device=device)
             steps_high = steps_high.unsqueeze(0).expand(lstm_output.shape[0], -1).unsqueeze(-1)
 
 
@@ -272,9 +269,10 @@ class Model(nn.Module):
 
 
             radius = self.f_radius(lstm_output)
+            tool_options = torch.tensor([0.025, 0.05, 0.075, 0.1], device=device)
 
             tool_distribution = F.gumbel_softmax(radius, tau=1, hard=True)
-            tool_radius = torch.sum(tool_distribution*self.mill_tool_options, dim=-1, keepdim=True)
+            tool_radius = torch.sum(tool_distribution*tool_options, dim=-1, keepdim=True)
             mill_radius.append(tool_radius)
 
 
@@ -290,19 +288,21 @@ class Model(nn.Module):
 
 
             R_M = axis_angle_to_matrix(angles)
-            rot = Transform3d(device=self.device).rotate(R_M)
+            rotated_all_points = transform_points(all_points, R_M)
 
             mill_rot_param.append(angles)
 
-            current,cyl = CSG(current, path_xyz, tool_radius, rot.transform_points(all_points))
+            current,cyl = CSG(current, path_xyz, tool_radius, rotated_all_points)
             if test:
-            	current_high,cyl_high = CSG(current_high, path_xyz, tool_radius, rot.transform_points(all_points_high))
+            	rotated_all_points_high = transform_points(all_points_high, R_M)
+            	current_high,cyl_high = CSG(current_high, path_xyz, tool_radius, rotated_all_points_high)
 
 
             loss_occ = mse(torch.sign(current), inds_inout)
 
 
-            ch1,ch2 = chamfer_distance_kdtree(torch.cat([path_xyz[0],path_xyz[1].unsqueeze(1).expand(-1,path_xyz[0].shape[1],-1)],-1)[:,:,:2], rot.transform_points(all_points[:,current_roi[0]>0])[:,:,:2])
+            rotated_roi_points = transform_points(all_points[:,current_roi[0]>0], R_M)
+            ch1,ch2 = chamfer_distance_kdtree(torch.cat([path_xyz[0],path_xyz[1].unsqueeze(1).expand(-1,path_xyz[0].shape[1],-1)],-1)[:,:,:2], rotated_roi_points[:,:,:2])
             loss_ends += (torch.mean(ch1) + torch.mean(ch2))
 
 
@@ -310,11 +310,16 @@ class Model(nn.Module):
 
 
 
+            # NOTE: .cpu().numpy() forces a device-to-host sync on XLA/TPU.
+            # This is required by the adaptive convergence check.
+            loss_occ_next = loss_occ.detach().cpu().numpy()
+
             it_mill += 1
 
 
+
         it_path = it_mill-1
-        loss_occ_prev = loss_occ.detach() - 1
+        loss_occ_prev = loss_occ_next-1
 
         mill_xy = torch.stack(mill_xy, dim=1).squeeze(0)
         mill_z = torch.stack(mill_z, dim=1).squeeze(0)
@@ -331,19 +336,17 @@ class Model(nn.Module):
         current = current.detach().clone()
         loss_nroi = 0
         it_drill = 0
-        MAX_DRILL = 20
 
-        # Drilling operations — fixed iteration count for XLA compatibility
-        for _drill_iter in range(MAX_DRILL):
-            # Guard: only enter drilling when best_iou > 0.92
-            if best_iou <= 0.92:
-                break
 
-            # On-device convergence check — avoids TPU-to-CPU sync
-            if it_drill > 0 and torch.abs(loss_occ.detach() - loss_occ_prev).item() <= 0.1:
-                break
-            loss_occ_prev = loss_occ.detach()
 
+
+
+
+        # Drilling operations
+        while np.abs(loss_occ_next-loss_occ_prev)>0.1 and it_drill <20 and best_iou>0.92: #and epoch>50:
+
+
+            loss_occ_prev = loss_occ.detach().cpu().numpy()
             current_roi = torch.minimum(inds_inout, torch.sign(-current).detach())
 
 
@@ -357,16 +360,17 @@ class Model(nn.Module):
             lstm_output = lstm_output.squeeze(1)
 
             N = 1
-            steps = torch.arange(start=0, end=1, step=1/N, device=lstm_output.device)
+            steps = torch.arange(start=0, end=1, step=1/N, device=device)
             steps = steps.unsqueeze(0).expand(lstm_output.shape[0], -1).unsqueeze(-1)
 
             rot_param = torch.tanh(self.f_rot_drill(lstm_output))*np.pi
             angles = torch.cat([rot_param,torch.zeros_like(rot_param[...,:1])],-1)
 
             radius = self.f_radius_drill(lstm_output)
+            tool_options = torch.tensor([0.01, 0.02, 0.03, 0.04], device=device)
 
             tool_distribution = F.gumbel_softmax(radius, tau=1, hard=True)
-            tool_radius = torch.sum(tool_distribution*self.drill_tool_options, dim=-1, keepdim=True)
+            tool_radius = torch.sum(tool_distribution*tool_options, dim=-1, keepdim=True)
 
             drill_radius.append(tool_radius)
 
@@ -384,23 +388,26 @@ class Model(nn.Module):
 
 
             R_M = axis_angle_to_matrix(angles)
-            rot = Transform3d(device=self.device).rotate(R_M)
+            rotated_all_points = transform_points(all_points, R_M)
 
             drill_rot_param.append(angles)
 
 
 
-            current,cyl = CSG(current, path_xyz, tool_radius, rot.transform_points(all_points))
+            current,cyl = CSG(current, path_xyz, tool_radius, rotated_all_points)
             if test:
-            	current_high,cyl_high = CSG(current_high, path_xyz, tool_radius, rot.transform_points(all_points_high))
+            	rotated_all_points_high = transform_points(all_points_high, R_M)
+            	current_high,cyl_high = CSG(current_high, path_xyz, tool_radius, rotated_all_points_high)
 
 
             loss_occ = mse(torch.sign(current), inds_inout)
+            #Loss_occ.append(loss_occ)
 
             filtered_points = filter_points(all_points[:,current_roi[0]>0], dimension)
             points_remaining = filtered_points.shape[1]
 
-            ch1,ch2 = chamfer_distance_kdtree(torch.cat([path_xyz[0],path_xyz[1].unsqueeze(1).expand(-1,path_xyz[0].shape[1],-1)],-1)[:,:,:2], (rot.transform_points(filtered_points)[:,:,:2]))
+            rotated_filtered = transform_points(filtered_points, R_M)
+            ch1,ch2 = chamfer_distance_kdtree(torch.cat([path_xyz[0],path_xyz[1].unsqueeze(1).expand(-1,path_xyz[0].shape[1],-1)],-1)[:,:,:2], (rotated_filtered[:,:,:2])) # Should be checked
             loss_ends += (torch.mean(ch1) + torch.mean(ch2))
 
 
@@ -414,8 +421,10 @@ class Model(nn.Module):
 
 
 
+            loss_occ_next = loss_occ.detach().cpu().numpy()
+
             it_drill += 1
-       
+
 
 
 
@@ -423,18 +432,18 @@ class Model(nn.Module):
             drill_xy = torch.stack(drill_xy, dim=1).squeeze(0)
             drill_z = torch.stack(drill_z, dim=1).squeeze(0)
             drill_rot_param = torch.stack(drill_rot_param, dim =1).squeeze(0)
-            drill_radius = torch.stack(drill_radius, dim=1).squeeze(0)      
+            drill_radius = torch.stack(drill_radius, dim=1).squeeze(0)
 
         else:
-            drill_current = drill_xy = drill_z = drill_rot_param = drill_radius = torch.tensor([], device=self.device)        
-         
+            drill_current = drill_xy = drill_z = drill_rot_param = drill_radius = torch.Tensor([])
 
-          
- 
-         
+
+
+
+
 
         loss_total = Loss_occ_drill + loss_ends/(it_mill+it_drill+2) + loss_roi/(it_mill+it_drill+2) + loss_nroi/(it_drill+1)
-        if test:        
+        if test:
         	return loss_total, current, current_high
-        else:        
-        	return loss_total, current        	
+        else:
+        	return loss_total, current

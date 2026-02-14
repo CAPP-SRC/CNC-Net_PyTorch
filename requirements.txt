@@ -1,13 +1,33 @@
-torch==2.8.0
-torch_xla[tpu]==2.8.0
+# CNCTORCH dependencies for Google Cloud TPU v4-32
+# Target: 32 spot Cloud TPU v4 chips in zone us-central2-b
+# Requires: Python >= 3.10
+#
+# Install:
+#   pip install -r requirements.txt
+#
+# All pytorch3d usage (KNN, Transform3d, axis_angle_to_matrix) has been
+# replaced with pure-PyTorch equivalents in utils/xla_ops.py so the
+# codebase runs on TPU/XLA without CUDA-only custom kernels.
+
+# --- PyTorch + XLA for TPU v4 -------------------------------------------
 --find-links https://storage.googleapis.com/libtpu-releases/index.html
+torch==2.5.0
+torch_xla[tpu]==2.5.0
+
+# --- Scientific computing -----------------------------------------------
 numpy
+scipy
+h5py
+
+# --- Geometry / mesh processing (CPU-only, data loading & post-proc) -----
 open3d
 pysdf
-scipy
 trimesh
-h5py
 PyMCubes
 ./required/pymesh2-0.3.1-cp310-cp310-linux_x86_64.whl
-plyfile
+
+# --- Utilities -----------------------------------------------------------
+fvcore
+iopath
 tqdm
+plyfile

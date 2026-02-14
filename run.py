@@ -4,12 +4,14 @@ import signal
 import sys
 import os
 import logging
+import math
 import json
 import time
 import torch.nn as nn
 import random
 import numpy as np
 from tqdm import tqdm
+
 import torch_xla
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.parallel_loader as pl
@@ -24,7 +26,7 @@ from utils.Logger import Logger
 import utils.utils as utils
 
 
-	
+
 class LearningRateSchedule:
 	def get_learning_rate(self, epoch):
 		pass
@@ -70,7 +72,7 @@ def get_learning_rate_schedules(specs):
 
 	for schedule_specs in schedule_specs:
 		if schedule_specs["Type"] == "Step":
-			
+
 			schedules.append(
 				StepLearningRateSchedule(
 					schedule_specs["Initial"],
@@ -106,18 +108,33 @@ def get_spec_with_default(specs, key, default):
 
 def init_seeds(seed=0):
     torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
 
-def main_function(experiment_directory, continue_from, input_object):
+def _train_fn(experiment_directory, continue_from, input_object):
+	"""Per-device training function launched by torch_xla.launch.
+
+	Each process owns exactly one XLA device (one TPU chip).
+	On a v4-32 pod there will be 16 processes across 4 hosts.
+	"""
 	device = xm.xla_device()
-	init_seeds()
-	out_dir = 'checkpoints/'+experiment_directory+'/'
-	logger = logging.getLogger()
-	handler = logging.FileHandler(out_dir+'logfile.log')
-	logger.addHandler(handler) 
-	logger.debug("running " + out_dir)
+	ordinal = xm.get_ordinal()
+	is_master = xm.is_master_ordinal()
+
+	init_seeds(seed=ordinal)
+
+	out_dir = 'checkpoints/' + experiment_directory + '/'
+
+	if is_master:
+		logger = logging.getLogger()
+		handler = logging.FileHandler(out_dir + 'logfile.log')
+		logger.addHandler(handler)
+		logger.debug("running " + out_dir)
+
 	specs = ws.load_experiment_specifications('configs')
 
-	logging.info("Experiment description: \n" + specs["Description"])
+	if is_master:
+		logging.info("Experiment description: \n" + specs["Description"])
 
 	arch = __import__("networks." + specs["NetworkArch"], fromlist=["PolyNet", "Decoder"])
 
@@ -128,78 +145,85 @@ def main_function(experiment_directory, continue_from, input_object):
 			specs["SnapshotFrequency"],
 		)
 	)
-	
+
 	for checkpoint in specs["AdditionalSnapshots"]:
 		checkpoints.append(checkpoint)
 	checkpoints.sort()
-	print(checkpoints)
+	if is_master:
+		print(checkpoints)
 	lr_schedules = get_learning_rate_schedules(specs)
 
-		
-	def save_checkpoints(epoch):
 
-		ws.save_model_parameters(out_dir, str(epoch) + ".pth", operation, optimizer_operation, epoch)
-	
-			
+	def save_checkpoints(epoch):
+		xm.save(
+			{
+				'epoch': epoch,
+				'operation_state_dict': operation.state_dict(),
+				'optimizer_state_dict': optimizer_operation.state_dict(),
+			},
+			os.path.join(out_dir, str(epoch) + ".pth"),
+		)
+
+
 	def signal_handler(sig, frame):
 		logging.info("Stopping early...")
 		sys.exit(0)
 
-	def adjust_learning_rate(lr_schedules, optimizer, epoch):		
+	def adjust_learning_rate(lr_schedules, optimizer, epoch):
 
 		for i, param_group in enumerate(optimizer.param_groups):
 			param_group["lr"] = lr_schedules[0].get_learning_rate(epoch)
-			print(param_group["lr"])
+			if is_master:
+				print(param_group["lr"])
 
 	start_time = time.time()
 	signal.signal(signal.SIGINT, signal_handler)
 
 
-
-	operation = Model(ef_dim = 256, device=device)
+	operation = Model(ef_dim=256)
 	operation = operation.to(device)
-	operation = torch.compile(operation, backend='openxla')
 
 
 
 	num_epochs = specs["NumEpochs"]
-	mse = nn.MSELoss(reduction = 'mean')
+	mse = nn.MSELoss(reduction='mean')
 
-	
-	
 
-	if args.input_object != None:
+
+	if input_object is not None:
 		occ_dataset_train = dataloader.DataLoader(
-		test_flag=True, inpt = args.input_object
-		)	
+			test_flag=True, inpt=input_object
+		)
 		occ_dataset_test = dataloader.DataLoader(
-		test_flag=True, inpt = args.input_object
+			test_flag=True, inpt=input_object
 		)
 
 
 
-	BATCH_SIZE = 8
-
-	train_loader = data_utils.DataLoader(
-		occ_dataset_train,
-		batch_size=BATCH_SIZE,
-		shuffle=False,
-		num_workers=0,
-		drop_last=True
+	train_loader = pl.MpDeviceLoader(
+		data_utils.DataLoader(
+			occ_dataset_train,
+			batch_size=1,
+			shuffle=False,
+			num_workers=4,
+		),
+		device,
 	)
-	train_loader = pl.MpDeviceLoader(train_loader, device)
 
-	test_loader = data_utils.DataLoader(
-		occ_dataset_test,
-		batch_size=1,
-		shuffle=False,
-		num_workers=0
+	test_loader = pl.MpDeviceLoader(
+		data_utils.DataLoader(
+			occ_dataset_test,
+			batch_size=1,
+			shuffle=False,
+			num_workers=4,
+		),
+		device,
 	)
-	test_loader = pl.MpDeviceLoader(test_loader, device)
 
 
 	num_scenes = len(occ_dataset_train)
-	logging.info("There are {} shapes".format(num_scenes))
+	if is_master:
+		logging.info("There are {} shapes".format(num_scenes))
 
 	logging.debug(operation)
 	optimizer_operation = torch.optim.Adam(
@@ -215,51 +239,59 @@ def main_function(experiment_directory, continue_from, input_object):
 
 
 	start_epoch = 0
-	if continue_from is not None: 
-		
-		logging.info('continuing from "{}"'.format(continue_from))
-		load = torch.load(out_dir+'operation_checkpoint_'+str(continue_from)+'.pth', map_location='cpu')
+	if continue_from is not None:
+
+		if is_master:
+			logging.info('continuing from "{}"'.format(continue_from))
+		load = torch.load(
+			out_dir + 'operation_checkpoint_' + str(continue_from) + '.pth',
+			map_location='cpu',
+		)
 		operation.load_state_dict(load["operation_state_dict"])
 		optimizer_operation.load_state_dict(load["optimizer_state_dict"])
-		model_epoch = load["epoch"]		
+		model_epoch = load["epoch"]
 		start_epoch = model_epoch + 1
+		# Re-move model to device after loading CPU state dict
+		operation = operation.to(device)
 		logging.debug("loaded")
-		logging.info("starting from epoch {}".format(start_epoch))
+		if is_master:
+			logging.info("starting from epoch {}".format(start_epoch))
 
 	operation.train()
 
 
 
-	
+
 	last_epoch_time = 0
-	best_iou = torch.zeros(len(train_loader), device=device)
+	best_iou = torch.zeros(len(train_loader))
 
 
 
 	# Training
 	BEST_IOU = 0
 	for epoch in range(start_epoch, start_epoch + num_epochs):
-		
+
 
 		adjust_learning_rate(lr_schedules, optimizer_operation, epoch - start_epoch)
 
 		TOTAL_LOSS = 0
-		for step_idx, (inds_inout, all_points, all_points_high, dimension, shape_names) in enumerate(tqdm(train_loader)):
-			# MpDeviceLoader already places tensors on TPU — no .to(device) needed
+		for inds_inout, all_points, all_points_high, dimension, shape_names in tqdm(train_loader, disable=not is_master):
+			# Data is already on the XLA device (MpDeviceLoader handles transfer).
+			# MpDeviceLoader calls torch_xla.sync() when yielding the next batch.
+			with torch_xla.step():
+				current = -torch.ones_like(inds_inout)
+				current_high = -torch.ones(1, 256*256*256, device=device).float()
 
-			current = -torch.ones_like(inds_inout)
-			current_high = -torch.ones(inds_inout.shape[0], 256*256*256, device=device).float()
-
-			total_loss, outputs = operation(current, current_high, all_points, all_points_high, inds_inout, 100, out_dir, torch.mean(best_iou.detach()), dimension, epoch, False)
+				total_loss, outputs = operation(current, current_high, all_points, all_points_high, inds_inout, 100, out_dir, torch.mean(best_iou.detach()), dimension, epoch, False)
 
 
-			valid = ~torch.isnan(total_loss.detach())
-			TOTAL_LOSS += torch.where(valid, total_loss.detach()/len(train_loader), torch.zeros_like(total_loss))
+				if not math.isnan(total_loss):
+					TOTAL_LOSS += total_loss.detach() / len(train_loader)
 
-			optimizer_operation.zero_grad()
-			total_loss.backward()
-			xm.optimizer_step(optimizer_operation)
 
+				optimizer_operation.zero_grad()
+				total_loss.backward()
+				optimizer_operation.step()
 
 			del total_loss
 			del outputs
@@ -268,18 +300,18 @@ def main_function(experiment_directory, continue_from, input_object):
 
 
 		if (epoch-start_epoch+1) in checkpoints:
-			save_checkpoints(epoch)		
-		
+			save_checkpoints(epoch)
+
 		# Testing
 		if (epoch+1) % 1 == 0:
 			#operation.eval()
 			IOU_total = []
 			with torch.no_grad():
+				# Data is already on the XLA device (MpDeviceLoader handles transfer).
 				inds_inout, all_points, all_points_high, dimension, shape_names = next(iter(test_loader))
-				# MpDeviceLoader already places tensors on TPU — no .to(device) needed
 
 				current = -torch.ones_like(inds_inout)
-				current_high = -torch.ones(1,256*256*256, device=device).float()
+				current_high = -torch.ones(1, 256*256*256, device=device).float()
 
 				_, outputs, outputs_high = operation(current, current_high, all_points, all_points_high, inds_inout, 100, out_dir, best_iou[shape_names], dimension, epoch, True)
 				iou = IOU(outputs, inds_inout)
@@ -290,44 +322,48 @@ def main_function(experiment_directory, continue_from, input_object):
 				outputs_high = 0.5*(-torch.sign(outputs_high)+1)
 				samples = all_points_high
 
-				create_mesh_mc(samples, outputs_high, dimension, os.path.join("output",experiment_directory,input_object[:-4]), device=device)
+				if is_master:
+					create_mesh_mc(samples, outputs_high, dimension, os.path.join("output", experiment_directory, input_object[:-4]))
 
 				average_best_iou = sum(IOU_total)/len(IOU_total)
-			logging.debug('Average IOU:\t{:.6f}'.format(average_best_iou))
+			if is_master:
+				logging.debug('Average IOU:\t{:.6f}'.format(average_best_iou))
 
 
 		if BEST_IOU < average_best_iou:
 
 			BEST_IOU = average_best_iou
-			model_path = out_dir+"operation_checkpoint_"+str(epoch)+".pth"
+			model_path = out_dir + "operation_checkpoint_" + str(epoch) + ".pth"
 			xm.save({
 				'epoch': epoch,
 				'operation_state_dict': operation.state_dict(),
 				'optimizer_state_dict': optimizer_operation.state_dict(),
 			}, model_path)
-			model_path2 = out_dir+"best_checkpoint"+".pth"
+			model_path2 = out_dir + "best_checkpoint" + ".pth"
 			xm.save({
 				'epoch': epoch,
 				'operation_state_dict': operation.state_dict(),
 				'optimizer_state_dict': optimizer_operation.state_dict(),
-			}, model_path2)	
-			logging.debug('BEST IOU:\t{:.6f}'.format(BEST_IOU))
+			}, model_path2)
+			if is_master:
+				logging.debug('BEST IOU:\t{:.6f}'.format(BEST_IOU))
 
 			seconds_elapsed = time.time() - start_time
 			ava_epoch_time = (seconds_elapsed - last_epoch_time)/10
 			last_epoch_time = seconds_elapsed
-	
-			
-		logging.debug("epoch = {}/{} , \
-			total_loss={:.6f}".format(epoch, num_epochs+start_epoch, TOTAL_LOSS))
 
-	
+
+		if is_master:
+			logging.debug("epoch = {}/{} , \
+				total_loss={:.6f}".format(epoch, num_epochs+start_epoch, TOTAL_LOSS))
+
+
 
 if __name__ == "__main__":
 
 	import argparse
 
-	arg_parser = argparse.ArgumentParser(description="Train a Network")
+	arg_parser = argparse.ArgumentParser(description="Train a Network on TPU")
 	arg_parser.add_argument(
 		"--experiment",
 		"-e",
@@ -345,21 +381,12 @@ if __name__ == "__main__":
 	)
 
 	arg_parser.add_argument(
-		"--tpu",
-		"-t",
-		dest="tpu",
-		required=False,
-		default="0",
-		help="tpu core index (default: 0)",
-	)
-
-	arg_parser.add_argument(
 		"--input_object",
 		"-i",
 		dest = "input_object",
-		required = True, 
+		required = True,
 		help = "The object name"
-		
+
 	)
 
 
@@ -391,5 +418,10 @@ if __name__ == "__main__":
 		print(f"Directory '{directory_path}' created.")
 	else:
 		print(f"Directory '{directory_path}' already exists.")
-				
-	main_function(args.experiment_directory, args.continue_from, args.input_object)
+
+	# Launch training across all available TPU devices.
+	# On a v4-32 pod (16 chips / 4 hosts) PJRT spawns one process per chip.
+	torch_xla.launch(
+		_train_fn,
+		args=(args.experiment_directory, args.continue_from, args.input_object),
+	)

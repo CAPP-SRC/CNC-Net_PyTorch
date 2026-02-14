@@ -1,21 +1,57 @@
+# Conda environment for CNCTORCH on Google Cloud TPU v4-32
+# Target: 32 spot Cloud TPU v4 chips in zone us-central2-b
+#
+# Setup:
+#   conda env create -f environment.yml
+#   conda activate cnctorch-tpu
+#
+# NOTE: After activating the environment, verify TPU access with:
+#   python -c "import torch_xla.core.xla_model as xm; print(xm.xla_device())"
+
 name: cnctorch-tpu
+
 channels:
-  - defaults
   - conda-forge
+  - defaults
+
 dependencies:
   - python=3.10
+  - pip
+
+  # Scientific computing (conda-forge for reliable builds on TPU VMs)
   - numpy
   - scipy
   - h5py
   - tqdm
-  - pip
+
   - pip:
-      - --find-links https://storage.googleapis.com/libtpu-releases/index.html
-      - torch==2.8.0
-      - torch_xla[tpu]==2.8.0
-      - open3d
-      - pysdf
-      - trimesh
-      - PyMCubes
-      - ./required/pymesh2-0.3.1-cp310-cp310-linux_x86_64.whl
-      - plyfile
+    # ---------------------------------------------------------------
+    # PyTorch + XLA for TPU v4
+    # torch_xla[tpu] pulls in libtpu and cloud-tpu-client automatically
+    # ---------------------------------------------------------------
+    - --find-links https://storage.googleapis.com/libtpu-releases/index.html
+    - torch==2.5.0
+    - torch_xla[tpu]==2.5.0
+
+    # ---------------------------------------------------------------
+    # Geometry / mesh processing (CPU-only, used for data loading
+    # and post-processing — no TPU interaction)
+    # ---------------------------------------------------------------
+    - open3d
+    - pysdf
+    - trimesh
+    - PyMCubes
+    - ./required/pymesh2-0.3.1-cp310-cp310-linux_x86_64.whl
+
+    # ---------------------------------------------------------------
+    # Utilities
+    # ---------------------------------------------------------------
+    - fvcore
+    - iopath
+    - plyfile
+
+    # ---------------------------------------------------------------
+    # All pytorch3d usage (KNN, Transform3d, axis_angle_to_matrix)
+    # has been replaced with pure-PyTorch equivalents in
+    # utils/xla_ops.py — no CUDA-only dependencies required.
+    # ---------------------------------------------------------------

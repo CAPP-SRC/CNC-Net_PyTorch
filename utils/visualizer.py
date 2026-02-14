@@ -5,8 +5,7 @@ import pymesh
 import trimesh
 import torch
 from tqdm import tqdm
-from utils.output_xyz import output_xyz
-from utils.tpu_ops import axis_angle_to_matrix, Transform3d
+from utils.xla_ops import axis_angle_to_matrix, transform_points
 
 
 def intersect(p1, p2, p3, p4):
@@ -179,15 +178,13 @@ def visualize(cnc_parameters, all_points, out_dir):
 
    for i in range(drill_xy.shape[0]):
       R_M = axis_angle_to_matrix(drill_rot_param[i])
-      rot = Transform3d().rotate(R_M)      
       R_M_inv = torch.from_numpy(np.linalg.inv(R_M.numpy()))
-      rot_inv = Transform3d().rotate(R_M_inv)
-      current = pymesh.form_mesh((rot.transform_points(torch.Tensor(current.vertices))).numpy(), np.array(current.faces))
+      current = pymesh.form_mesh(transform_points(torch.Tensor(current.vertices), R_M).numpy(), np.array(current.faces))
       r = drill_radius[i][0]
       cylinder_drill = pymesh.generate_cylinder(drill_xyz[i,0],torch.Tensor([0,0,1]), r, r, num_segments=16)
-      
+
       current = pymesh.boolean(current, cylinder_drill, operation="difference", engine ="cork")
-      current = pymesh.form_mesh((rot_inv.transform_points(torch.Tensor(current.vertices))).numpy(), np.array(current.faces))
+      current = pymesh.form_mesh(transform_points(torch.Tensor(current.vertices), R_M_inv).numpy(), np.array(current.faces))
       
 
 
@@ -205,13 +202,11 @@ def visualize(cnc_parameters, all_points, out_dir):
       mesh_2d = pymesh.form_mesh(np.array(vertices), np.array(faces))
 
       R_M = axis_angle_to_matrix(mill_rot_param[j])
-      rot = Transform3d().rotate(R_M)
       R_M_inv = torch.from_numpy(np.linalg.inv(R_M.numpy()))
-      rot_inv = Transform3d().rotate(R_M_inv)
 
 
 
-      current = pymesh.form_mesh((rot.transform_points(torch.Tensor(current.vertices))).numpy(), np.array(current.faces))
+      current = pymesh.form_mesh(transform_points(torch.Tensor(current.vertices), R_M).numpy(), np.array(current.faces))
 
 
 
@@ -247,7 +242,7 @@ def visualize(cnc_parameters, all_points, out_dir):
 
 
       
-      current = pymesh.form_mesh((rot_inv.transform_points(torch.Tensor(current.vertices))).numpy(), np.array(current.faces))
+      current = pymesh.form_mesh(transform_points(torch.Tensor(current.vertices), R_M_inv).numpy(), np.array(current.faces))
 
    current = extract_largest_component(current)
    pymesh.save_mesh(out_dir+'.ply', current, ascii=True)
@@ -376,10 +371,9 @@ def visualize_old(cnc_parameters, all_points, out_dir):
 
    for i in range(drill_xy.shape[0]):
       R_M_inv = axis_angle_to_matrix(-drill_rot_param[i])
-      rot_inv = Transform3d().rotate(R_M_inv)
       r = drill_radius[i][0]
-      cylinder_drill = pymesh.generate_cylinder(rot_inv.transform_points(drill_xyz[i,0].unsqueeze(0))[0], rot_inv.transform_points((drill_xyz[i,0]+torch.Tensor([0,0,1])).unsqueeze(0))[0], r, r, num_segments=16)
-      
+      cylinder_drill = pymesh.generate_cylinder(transform_points(drill_xyz[i,0].unsqueeze(0), R_M_inv)[0], transform_points((drill_xyz[i,0]+torch.Tensor([0,0,1])).unsqueeze(0), R_M_inv)[0], r, r, num_segments=16)
+
       current = pymesh.boolean(current, cylinder_drill, operation="difference", engine ="cork")
    
 
@@ -398,12 +392,10 @@ def visualize_old(cnc_parameters, all_points, out_dir):
       mesh_2d = pymesh.form_mesh(np.array(vertices), np.array(faces))
 
       R_M = axis_angle_to_matrix(mill_rot_param[j])
-      rot = Transform3d().rotate(R_M)
       R_M_inv = axis_angle_to_matrix(-mill_rot_param[j])
-      rot_inv = Transform3d().rotate(R_M_inv)
 
 
-      initial = pymesh.form_mesh((rot.transform_points(torch.Tensor(initial.vertices))).numpy(), np.array(initial.faces))
+      initial = pymesh.form_mesh(transform_points(torch.Tensor(initial.vertices), R_M).numpy(), np.array(initial.faces))
 
 
 
@@ -439,7 +431,7 @@ def visualize_old(cnc_parameters, all_points, out_dir):
 
 
       
-      diff = pymesh.form_mesh((rot_inv.transform_points(torch.Tensor(diff.vertices))).numpy(), np.array(diff.faces))
+      diff = pymesh.form_mesh(transform_points(torch.Tensor(diff.vertices), R_M_inv).numpy(), np.array(diff.faces))
       pymesh.save_mesh(out_dir+'diff_'+str(j)+'.ply', diff, ascii=True)
       diffs.append(diff)
 
