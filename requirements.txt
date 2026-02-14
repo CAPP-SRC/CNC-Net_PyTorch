@@ -1,5 +1,6 @@
-torch>=2.1
-torch_xla>=2.1
+torch==2.8.0
+torch_xla[tpu]==2.8.0
+--find-links https://storage.googleapis.com/libtpu-releases/index.html
 numpy
 open3d
 pysdf
@@ -7,6 +8,6 @@ scipy
 trimesh
 h5py
 PyMCubes
-pymesh2
+./required/pymesh2-0.3.1-cp310-cp310-linux_x86_64.whl
 plyfile
 tqdm
