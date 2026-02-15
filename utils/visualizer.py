@@ -6,7 +6,6 @@ import trimesh
 import torch
 # import pytorch3d
 from tqdm import tqdm
-from utils.output_xyz import output_xyz
 # from pytorch3d.transforms.transform3d import Transform3d
 from utils.xla_ops import axis_angle_to_matrix, transform_points
 

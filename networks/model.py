@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
 # import pytorch3d
-import copy
+
 
 from utils.xla_ops import knn_points, axis_angle_to_matrix, transform_points
 from networks.primitives import CSG
@@ -276,7 +276,7 @@ class Model(nn.Module):
             tool_distribution = F.gumbel_softmax(radius, tau=1, hard=True)
             tool_radius = torch.sum(tool_distribution*tool_options, dim=-1, keepdim=True)
             mill_radius.append(tool_radius)
-
+            mill_rot_param.append(angles)
 
             if it_mill>0:
                xy_prev = xy
@@ -331,7 +331,7 @@ class Model(nn.Module):
 
         Loss_occ_drill = mse(torch.tanh(w*current), inds_inout) 
         
-        current = copy.deepcopy(current.detach())
+        current = current.detach().clone()
         loss_nroi = 0
         it_drill = 0
         

@@ -24,22 +24,12 @@ class DataLoader(torch.utils.data.Dataset):
 
 
 
-		voxels_low = np.zeros([self.N,self.N,self.N,3])
-		for i in range(self.N):
-			for j in range(self.N):
-				for k in range(self.N):
-					voxels_low[i,j,k] = [i,j,k]
-		self.voxels_low = voxels_low
+		self.voxels_low = np.indices((self.N, self.N, self.N), dtype=np.float64).transpose(1, 2, 3, 0)
 		
 		
 
 		
-		voxels_high = np.zeros([self.N*4,self.N*4,self.N*4,3])	
-		for i in range(self.N*4):
-			for j in range(self.N*4):
-				for k in range(self.N*4):
-					voxels_high[i,j,k] = [i,j,k]
-		self.voxels_high = voxels_high
+		self.voxels_high = np.indices((self.N*4, self.N*4, self.N*4), dtype=np.float64).transpose(1, 2, 3, 0)
 
 		self.mesh = o3d.io.read_triangle_mesh(os.path.join('samples',self.inpt))
 		f = SDF(np.asarray(self.mesh.vertices), np.asarray(self.mesh.triangles))

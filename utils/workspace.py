@@ -42,7 +42,7 @@ def load_model_parameters(experiment_directory, checkpoint, decoder, opt):
 	if not os.path.isfile(filename):
 		raise Exception('model state dict "{}" does not exist'.format(filename))
 
-	data = torch.load(filename)
+	data = torch.load(filename, map_location="cpu", weights_only=True)
 	
 
 
@@ -73,7 +73,7 @@ def load_model_parameters_per_shape(experiment_directory, shapename, checkpoint,
 	if not os.path.isfile(filename):
 		raise Exception('model state dict "{}" does not exist'.format(filename))
 
-	data = torch.load(filename)
+	data = torch.load(filename, map_location="cpu", weights_only=True)
 
 	#test stage no opt
 	if opt is not None:

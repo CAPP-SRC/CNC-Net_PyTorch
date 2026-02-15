@@ -143,8 +143,8 @@ def main_function(experiment_directory, continue_from, input_object):
 		# ws.save_model_parameters(out_dir, str(epoch) + ".pth", operation, optimizer_operation, epoch)
 		xm.save(
 			{"epoch": epoch,
-			"decoder_state_dict": operation.state_dict(),
-			"opt_state_dict": optimizer_operation.state_dict()},
+			"operation_state_dict": operation.state_dict(),
+			"optimizer_state_dict": optimizer_operation.state_dict()},
 			os.path.join(out_dir, str(epoch) + ".pth"),
 		)
 	
@@ -221,7 +221,7 @@ def main_function(experiment_directory, continue_from, input_object):
 	if continue_from is not None: 
 		
 		logging.info('continuing from "{}"'.format(continue_from))
-		load = torch.load(out_dir+'operation_checkpoint_'+str(continue_from)+'.pth')
+		load = torch.load(out_dir+'operation_checkpoint_'+str(continue_from)+'.pth', map_location="cpu", weights_only=True)
 		operation.load_state_dict(load["operation_state_dict"])
 		optimizer_operation.load_state_dict(load["optimizer_state_dict"])
 		model_epoch = load["epoch"]		
