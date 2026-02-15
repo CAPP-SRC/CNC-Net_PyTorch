@@ -84,7 +84,7 @@ class Generator(nn.Module):
 	def forward(self, points, primitives, phase, is_leaky=False):
 		min_clamp = Myminclamp.apply
 		max_clamp = Mymaxclamp.apply
-		ones = torch.ones(points.size(0), points.size(1), 1, device=points.device)
+		ones = torch.ones(points.size(0), points.size(1), 1).to(points.device)
 		pointsx = torch.cat([points**2, points, ones], 2)
 		if phase==0: #S+
 			#level 1 D=relu(xP)

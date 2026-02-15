@@ -11,8 +11,9 @@
 
 # --- PyTorch + XLA for TPU v4 -------------------------------------------
 --find-links https://storage.googleapis.com/libtpu-releases/index.html
-torch==2.5.0
-torch_xla[tpu]==2.5.0
+torch==2.8.0
+torch_xla[tpu]==2.8.0
+torchvision
 
 # --- Scientific computing -----------------------------------------------
 numpy

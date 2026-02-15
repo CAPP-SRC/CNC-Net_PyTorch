@@ -30,8 +30,9 @@ dependencies:
     # torch_xla[tpu] pulls in libtpu and cloud-tpu-client automatically
     # ---------------------------------------------------------------
     - --find-links https://storage.googleapis.com/libtpu-releases/index.html
-    - torch==2.5.0
-    - torch_xla[tpu]==2.5.0
+    - torch==2.8.0
+    - torch_xla[tpu]==2.8.0
+    - torchvision
 
     # ---------------------------------------------------------------
     # Geometry / mesh processing (CPU-only, used for data loading

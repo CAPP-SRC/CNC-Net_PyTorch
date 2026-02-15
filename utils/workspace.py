@@ -1,6 +1,7 @@
 import json
 import os
 import torch
+import torch_xla.core.xla_model as xm
 
 model_params_subdir = "ModelParameters"
 latent_codes_subdir = "LatentCodes"
@@ -25,7 +26,7 @@ def save_model_parameters(experiment_directory, filename, decoder, opt, epoch):
 
 	model_params_dir = get_model_params_dir(experiment_directory, True)
 
-	torch.save(
+	xm.save(
 		{"epoch": epoch,
 		"decoder_state_dict": decoder.state_dict(),
 		"opt_state_dict": opt.state_dict()},
@@ -55,7 +56,7 @@ def save_model_parameters_per_shape(experiment_directory, shapename, filename, d
 	model_params_dir = get_model_params_dir(experiment_directory, True)
 	model_params_dir = get_model_params_dir_shapename(model_params_dir, shapename, True)
 
-	torch.save(
+	xm.save(
 		{"epoch": epoch,
 		"plane_state_dict": shape_code,
 		"decoder_state_dict": decoder.state_dict(),

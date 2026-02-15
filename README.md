@@ -24,7 +24,7 @@ Install the dependencies:
 * PyTorch 1.12.1
 * numpy
 * open3d
-* pytorch3d
+
 * pysdf
 
 ## Quick Start
