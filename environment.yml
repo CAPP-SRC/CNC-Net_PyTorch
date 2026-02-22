@@ -1,0 +1,20 @@
+name: cnctorch-gpu
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.8.18
+  - numpy
+  - scipy
+  - h5py
+  - tqdm
+  - pip
+  - pip:
+      - torch==1.12.1
+      - open3d
+      - pytorch3d      
+      - pysdf
+      - trimesh
+      - PyMCubes
+      - ./required/pymesh2-0.3.1-cp310-cp310-linux_x86_64.whl
+      - plyfile
